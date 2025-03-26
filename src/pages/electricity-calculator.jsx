@@ -67,8 +67,8 @@ const ElectricityCalculator = () => {
     month: getCurrentMonth(),
     oldReading: 0,
     newReading: 0,
-    extraCost: 10000,
-    note: "phí đồng hồ hằng tháng",
+    extraCost: 0,
+    note: "",
   });
 
   // Add new person
@@ -121,13 +121,34 @@ const ElectricityCalculator = () => {
 
       if (latestReading) {
         // If previous reading exists, use its new reading as the old reading
-        setNewReading({
-          personId: selectedPerson.id,
-          month: currentMonth,
-          oldReading: latestReading.newReading,
-          newReading: latestReading.newReading,
-          extraCost: latestReading.extraCost,
-          note: latestReading.note,
+        setNewReading(() => {
+          const [currentYear, currentMonthNum] = currentMonth
+            .split("-")
+            .map(Number);
+          const [latestYear, latestMonthNum] = latestReading.month
+            .split("-")
+            .map(Number);
+          const monthDifference =
+            (currentYear - latestYear) * 12 +
+            (currentMonthNum - latestMonthNum);
+          const calculatedExtraCost =
+            monthDifference > 0
+              ? 10000 * monthDifference
+              : latestReading.extraCost;
+
+          return {
+            personId: selectedPerson.id,
+            month: currentMonth,
+            oldReading: latestReading.newReading,
+            newReading: latestReading.newReading,
+            extraCost: calculatedExtraCost,
+            note:
+              calculatedExtraCost > 0
+                ? `Chi phí bổ sung bao gồm phụ phí đồng hồ ${monthDifference} tháng: ${new Intl.NumberFormat(
+                    "vi-VN"
+                  ).format(calculatedExtraCost)} đ`
+                : latestReading.note || "",
+          };
         });
       } else {
         // First time reading for this person
@@ -136,8 +157,8 @@ const ElectricityCalculator = () => {
           month: currentMonth,
           oldReading: 0,
           newReading: 0,
-          extraCost: 10000,
-          note: "phí đồng hồ hằng tháng",
+          extraCost: 0,
+          note: "",
         });
       }
     }
@@ -249,25 +270,25 @@ const ElectricityCalculator = () => {
       finalTotalAmount = totalBillAmount;
     }
 
-// Tính toán tổng chi phí phụ từ tất cả các tháng liên quan
-const calculateTotalExtraCost = (months, readings) => {
-  return readings
-    .filter(reading => months.includes(reading.month))
-    .reduce((sum, reading) => sum + (reading.extraCost || 0), 0);
-};
+    // Tính toán tổng chi phí phụ từ tất cả các tháng liên quan
+    const calculateTotalExtraCost = (months, readings) => {
+      return readings
+        .filter((reading) => months.includes(reading.month))
+        .reduce((sum, reading) => sum + (reading.extraCost || 0), 0);
+    };
 
-// Lấy tổng chi phí phụ
-const totalExtraCost = calculateTotalExtraCost(months, readings);
+    // Lấy tổng chi phí phụ
+    const totalExtraCost = calculateTotalExtraCost(months, readings);
 
-// Lưu dữ liệu vào Firebase với thông tin tháng gộp và chi phí phụ
-const billData = {
-  totalAmount: finalTotalAmount,
-  totalKwh: totalKwh,
-  pricePerUnit: finalPricePerUnit,
-  includedMonths: isMultiMonthBill ? includedMonths : [],
-  isMultiMonth: isMultiMonthBill,
-  totalExtraCost: totalExtraCost, // Thêm thông tin về tổng chi phí phụ
-};
+    // Lưu dữ liệu vào Firebase với thông tin tháng gộp và chi phí phụ
+    const billData = {
+      totalAmount: finalTotalAmount,
+      totalKwh: totalKwh,
+      pricePerUnit: finalPricePerUnit,
+      includedMonths: isMultiMonthBill ? includedMonths : [],
+      isMultiMonth: isMultiMonthBill,
+      totalExtraCost: totalExtraCost, // Thêm thông tin về tổng chi phí phụ
+    };
 
     const result = await saveMonthBill(currentMonth, billData);
 
@@ -407,6 +428,16 @@ const billData = {
         {currentMonthBill && (
           <Box className="p-4 bg-blue-50 rounded-md mb-4">
             <Box flex justifyContent="space-between" mb={1}>
+              <Text size="small">Tổng tiền chi phí bổ sung:</Text>
+              <Text bold>
+                {new Intl.NumberFormat("vi-VN").format(
+                  currentMonthBill.totalExtraCost
+                )}{" "}
+                đ
+              </Text>
+            </Box>
+
+            <Box flex justifyContent="space-between" mb={1}>
               <Text size="small">Tổng tiền điện:</Text>
               <Text bold>
                 {new Intl.NumberFormat("vi-VN").format(
@@ -495,13 +526,43 @@ const billData = {
                           {reading.newReading - reading.oldReading} kWh)
                         </Text>
                         {currentMonthBill && (
-                          <Text size="xSmall" bold className="text-green-600">
-                            Tiền điện:{" "}
-                            {new Intl.NumberFormat("vi-VN").format(
-                              calculateCost(reading, currentMonthBill)
-                            )}{" "}
-                            đ
-                          </Text>
+                          <>
+                            <Text size="xSmall" className="">
+                              Tiền điện:{" "}
+                              {new Intl.NumberFormat("vi-VN").format(
+                                calculateCost(reading, currentMonthBill)
+                              )}{" "}
+                              đ
+                            </Text>
+                            <Text size="xSmall" className="">
+                              Tiền bổ sung:{" "}
+                              {new Intl.NumberFormat("vi-VN").format(
+                                reading.extraCost
+                              )}{" "}
+                              đ
+                            </Text>
+                            <Text size="xSmall" bold className="text-green-600">
+                              Tổng cộng:{" "}
+                              {new Intl.NumberFormat("vi-VN").format(
+                                calculateCost(reading, currentMonthBill) +
+                                  reading.extraCost
+                              )}{" "}
+                              đ
+                            </Text>
+                            <Box
+                              className="mt-2 pt-1 border-t border-blue-100"
+                              flex
+                              justifyContent="center"
+                            >
+                              <Text
+                                size="small"
+                                italic
+                                className="text-blue-500"
+                              >
+                                {reading.note}
+                              </Text>
+                            </Box>
+                          </>
                         )}
                       </Box>
                     )}

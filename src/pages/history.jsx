@@ -5,12 +5,10 @@ import { Page, Box, Text, Select } from "zmp-ui";
 import { getCurrentMonth } from "../services/date.service";
 import {
   getMonthsWithReadings,
-  getMonthReadings,
   calculateMonthUsage,
 } from "../services/reading.service";
 import { 
   calculateCost, 
-  calculateMonthTotalCost, 
   getMonthBill as getMonthBillService 
 } from "../services/bill.service";
 
@@ -162,16 +160,9 @@ const HistoryPage = () => {
     ) : (
       <Box className="space-y-3">
         {bills.map((bill) => {
-          const monthReadings = getMonthReadings(bill.month, readings);
-          // Sử dụng totalKwh từ bill hoặc tính toán nếu không có
           const totalUsage = bill.totalKwh || calculateMonthUsage(bill.month, readings);
-          // Tính tổng chi phí bổ sung
-          const totalExtraCostForMonth = monthReadings.reduce(
-            (sum, r) => sum + (r.extraCost || 0), 0
-          );
-          
-          // Tính tiền điện bằng cách trừ chi phí bổ sung từ tổng tiền
-          const totalElectricityCost = bill.totalAmount - totalExtraCostForMonth;
+          const totalExtraCostForMonth = bill.totalExtraCost;
+          const totalElectricityCost = bill.totalAmount;
 
           return (
             <Box key={bill.month} className="p-3 border rounded-md">
@@ -209,7 +200,7 @@ const HistoryPage = () => {
                 >
                   <Text size="small" bold>Tổng cộng:</Text>
                   <Text size="small" bold className="text-red-500">
-                    {new Intl.NumberFormat("vi-VN").format(bill.totalAmount)} đ
+                    {new Intl.NumberFormat("vi-VN").format(totalElectricityCost + totalExtraCostForMonth)} đ
                   </Text>
                 </Box>
               </Box>
@@ -243,24 +234,9 @@ const HistoryPage = () => {
     {(() => {
       const month = selectedMonth;
       const monthBill = getMonthBill(month);
-      const monthReadings = getMonthReadings(month, readings);
-      const totalUsage = calculateMonthUsage(month, readings);
-      
-      // Tính toán chi phí dựa trên từng chỉ số riêng lẻ
-      let totalCost = 0;
-      let totalElectricityCost = 0;
-      const totalExtraCostForMonth = monthReadings.reduce(
-        (sum, r) => sum + (r.extraCost || 0), 0
-      );
-
-      // Sử dụng calculateCost từ bill.service để tính chi phí cho từng chỉ số
-      monthReadings.forEach((reading) => {
-        if (monthBill) {
-          const cost = calculateCost(reading, monthBill);
-          totalCost += cost;
-          totalElectricityCost += cost - (reading.extraCost || 0);
-        }
-      });
+      const totalUsage = monthBill.totalKwh;
+      const totalElectricityCost = monthBill.totalAmount;
+      const totalExtraCostForMonth = monthBill.totalExtraCost;
 
       // Hiển thị thông tin chi tiết tháng
       return (
@@ -374,15 +350,12 @@ const HistoryPage = () => {
     <Box className="space-y-3">
       {filteredReadings.map((reading) => {
         const person = people.find((p) => p.id === reading.personId);
-        const usage = Math.max(0, reading.newReading - reading.oldReading);
         const monthBill = getMonthBill(reading.month);
+        const usage = Math.max(0, reading.newReading - reading.oldReading);
 
         // Tính chi phí điện sử dụng calculateCost từ bill.service
-        const cost = monthBill ? calculateCost(reading, monthBill) : 0;
+        const electricityCost = monthBill ? calculateCost(reading, monthBill) : 0;
         const extraCost = reading.extraCost || 0;
-        
-        // Tính tiền điện bằng cách trừ chi phí phụ
-        const electricityCost = cost - extraCost;
         const totalCost = electricityCost + extraCost;
 
         return (
