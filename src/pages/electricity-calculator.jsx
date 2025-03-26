@@ -14,6 +14,7 @@ import {
 import { useFirebasePeople } from "../hooks/useFirebasePeople";
 import { useFirebaseReadings } from "../hooks/useFirebaseReadings";
 import { useFirebaseBills } from "../hooks/useFirebaseBills";
+import * as htmlToImage from 'html-to-image';
 
 // Import các hàm từ services
 import {
@@ -56,10 +57,11 @@ const ElectricityCalculator = () => {
   const [pricePerUnitEdited, setPricePerUnitEdited] = useState(false);
   const [isMultiMonthBill, setIsMultiMonthBill] = useState(false);
   const [includedMonths, setIncludedMonths] = useState([]);
-
+  
   const snackbar = useSnackbar();
   const isLoading = peopleLoading || readingsLoading || billsLoading;
 
+  const [showExportBillModal, setShowExportBillModal] = useState(false);
   // Form state
   const [newPerson, setNewPerson] = useState({ name: "" });
   const [newReading, setNewReading] = useState({
@@ -70,6 +72,191 @@ const ElectricityCalculator = () => {
     extraCost: 0,
     note: "",
   });
+
+  // Thêm hàm này để tạo nội dung hóa đơn dạng text
+const generateBillText = () => {
+  let billText = `HÓA ĐƠN TIỀN ĐIỆN - THÁNG ${currentMonth}\n\n`;
+  
+  if (currentMonthBill && currentMonthBill.isMultiMonth) {
+    billText += `(Hóa đơn gộp: ${[...currentMonthBill.includedMonths, currentMonth].join(", ")})\n\n`;
+  }
+  
+  billText += `Tổng tiêu thụ: ${currentMonthBill?.totalKwh} kWh\n`;
+  billText += `Đơn giá điện: ${new Intl.NumberFormat("vi-VN").format(currentMonthBill?.pricePerUnit)} đ/kWh\n`;
+  billText += `Tiền điện: ${new Intl.NumberFormat("vi-VN").format(currentMonthBill?.totalAmount - currentMonthBill?.totalExtraCost)} đ\n`;
+  billText += `Chi phí bổ sung: ${new Intl.NumberFormat("vi-VN").format(currentMonthBill?.totalExtraCost)} đ\n`;
+  billText += `TỔNG CỘNG: ${new Intl.NumberFormat("vi-VN").format(currentMonthBill?.totalAmount)} đ\n\n`;
+  
+  billText += `CHI TIẾT THEO NGƯỜI DÙNG:\n`;
+  
+  people.forEach((person) => {
+    const reading = readings.find(
+      (r) => r.personId === person.id && r.month === currentMonth
+    );
+    if (!reading) return;
+    
+    const usage = reading.newReading - reading.oldReading;
+    const electricityCost = currentMonthBill ? calculateCost(reading, currentMonthBill) : 0;
+    const totalCost = electricityCost + (reading.extraCost || 0);
+    
+    billText += `\n${person.name}\n`;
+    billText += `Chỉ số: ${reading.oldReading} → ${reading.newReading} (${usage} kWh)\n`;
+    billText += `Tiền điện: ${new Intl.NumberFormat("vi-VN").format(electricityCost)} đ\n`;
+    
+    if (reading.extraCost > 0) {
+      billText += `Chi phí bổ sung: ${new Intl.NumberFormat("vi-VN").format(reading.extraCost)} đ\n`;
+    }
+    
+    billText += `Tổng cộng: ${new Intl.NumberFormat("vi-VN").format(totalCost)} đ\n`;
+    
+    if (reading.note) {
+      billText += `Ghi chú: ${reading.note}\n`;
+    }
+  });
+  
+  billText += `\nNgày xuất hóa đơn: ${new Date().toLocaleDateString("vi-VN")}`;
+  
+  return billText;
+};
+// Hàm tải xuống hình ảnh hóa đơn
+// Cập nhật hàm downloadBillAsImage để hoạt động tốt hơn trên thiết bị di động
+const downloadBillAsImage = async () => {
+  try {
+    snackbar.openSnackbar({
+      text: "Đang tạo hình ảnh hóa đơn...",
+      type: "info",
+    });
+    
+    const billElement = document.getElementById('bill-export');
+    
+    if (!billElement) {
+      throw new Error('Không tìm thấy phần tử hóa đơn');
+    }
+    
+    // Thêm padding và đặt nền trắng để hình ảnh đẹp hơn
+    const originalPadding = billElement.style.padding;
+    const originalBg = billElement.style.backgroundColor;
+    
+    billElement.style.padding = '20px';
+    billElement.style.backgroundColor = 'white';
+    
+    // Tạo hình ảnh từ phần tử DOM
+    const dataUrl = await htmlToImage.toPng(billElement, {
+      quality: 0.95,
+      backgroundColor: 'white',
+      style: {
+        margin: '0',
+        boxShadow: 'none',
+      }
+    });
+    
+    // Khôi phục style gốc
+    billElement.style.padding = originalPadding;
+    billElement.style.backgroundColor = originalBg;
+
+    // Xử lý dựa trên thiết bị
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      // Tạo hình ảnh trong DOM
+      const imgElement = document.createElement('img');
+      imgElement.src = dataUrl;
+      
+      // Tạo một div container cho hình ảnh
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.top = '0';
+      container.style.left = '0';
+      container.style.right = '0';
+      container.style.bottom = '0';
+      container.style.backgroundColor = 'rgba(0,0,0,0.9)';
+      container.style.zIndex = '9999';
+      container.style.display = 'flex';
+      container.style.flexDirection = 'column';
+      container.style.justifyContent = 'center';
+      container.style.alignItems = 'center';
+      container.style.padding = '20px';
+      
+      // Tạo heading
+      const heading = document.createElement('h3');
+      heading.textContent = 'Hóa đơn tiền điện - Tháng ' + currentMonth;
+      heading.style.color = 'white';
+      heading.style.marginBottom = '10px';
+      
+      // Tạo hướng dẫn
+      const instruction = document.createElement('p');
+      instruction.textContent = 'Nhấn giữ vào hình ảnh để lưu';
+      instruction.style.color = 'white';
+      instruction.style.marginBottom = '20px';
+      instruction.style.fontSize = '14px';
+      
+      // Tạo nút đóng
+      const closeButton = document.createElement('button');
+      closeButton.textContent = 'Đóng';
+      closeButton.style.marginTop = '20px';
+      closeButton.style.padding = '10px 20px';
+      closeButton.style.background = 'white';
+      closeButton.style.border = 'none';
+      closeButton.style.borderRadius = '4px';
+      closeButton.onclick = () => {
+        document.body.removeChild(container);
+      };
+      
+      // Thiết lập style cho hình ảnh
+      imgElement.style.maxWidth = '100%';
+      imgElement.style.maxHeight = '70vh';
+      imgElement.style.objectFit = 'contain';
+      imgElement.style.border = '1px solid #ccc';
+      imgElement.style.backgroundColor = 'white';
+      
+      // Thêm tất cả các phần tử vào container
+      container.appendChild(heading);
+      container.appendChild(instruction);
+      container.appendChild(imgElement);
+      container.appendChild(closeButton);
+      
+      // Thêm container vào body
+      document.body.appendChild(container);
+      
+      snackbar.openSnackbar({
+        text: "Nhấn giữ vào hình ảnh để lưu.",
+        type: "success",
+        duration: 5000,
+      });
+    } else {
+      // Máy tính - tạo link để tải xuống
+      const link = document.createElement('a');
+      link.download = `Hoa-don-dien-thang-${currentMonth.replace('-', '_')}.png`;
+      link.href = dataUrl;
+      link.click();
+      
+      snackbar.openSnackbar({
+        text: "Đã tải xuống hình ảnh hóa đơn",
+        type: "success",
+      });
+    }
+  } catch (error) {
+    console.error("Lỗi tạo hình ảnh:", error);
+    snackbar.openSnackbar({
+      text: "Không thể tạo hình ảnh hóa đơn",
+      type: "error",
+    });
+    
+    // Fallback nếu không tạo được hình ảnh
+    showBillAsAlert();
+  }
+};
+// Hàm hiển thị hóa đơn dạng alert nếu không thể chia sẻ
+const showBillAsAlert = () => {
+  const billText = generateBillText();
+  snackbar.openSnackbar({
+    text: "Không thể chia sẻ trực tiếp, hiển thị nội dung hóa đơn.",
+    type: "info",
+  });
+  
+  // Hiển thị hộp thoại với nội dung hóa đơn
+  setTimeout(() => {
+    alert("HÓA ĐƠN TIỀN ĐIỆN\n\n" + billText);
+  }, 1000);
+};
 
   // Add new person
   const handleAddPerson = async () => {
@@ -135,11 +322,15 @@ const ElectricityCalculator = () => {
             monthDifference > 0
               ? 10000 * monthDifference
               : latestReading.extraCost;
+          const getOldReading =
+            monthDifference > 0
+              ? latestReading.newReading
+              : latestReading.oldReading;
 
           return {
             personId: selectedPerson.id,
             month: currentMonth,
-            oldReading: latestReading.newReading,
+            oldReading: getOldReading,
             newReading: latestReading.newReading,
             extraCost: calculatedExtraCost,
             note:
@@ -468,7 +659,7 @@ const ElectricityCalculator = () => {
 
             {currentMonthBill.isMultiMonth && (
               <Box className="mt-2 pt-2 border-t border-blue-200">
-                <Text size="small" italic className="text-blue-600">
+                <Text size="small" className="text-blue-600 italic">
                   Hóa đơn này bao gồm{" "}
                   {currentMonthBill.includedMonths.length + 1} tháng:{" "}
                   {[...currentMonthBill.includedMonths, currentMonth].join(
@@ -485,6 +676,7 @@ const ElectricityCalculator = () => {
             <Text className="text-gray-500">Chưa có người dùng nào</Text>
           </Box>
         ) : (
+          <>
           <Box className="space-y-3">
             {people.map((person) => {
               const hasReading = hasCurrentMonthReading(person.id);
@@ -556,8 +748,7 @@ const ElectricityCalculator = () => {
                             >
                               <Text
                                 size="small"
-                                italic
-                                className="text-blue-500"
+                                className="text-blue-500 italic"
                               >
                                 {reading.note}
                               </Text>
@@ -578,6 +769,33 @@ const ElectricityCalculator = () => {
               );
             })}
           </Box>
+              {/* Nút xuất hóa đơn */}
+    <Box className="mt-4 flex justify-center">
+      <Button
+        size="large" 
+        className="bg-green-600 text-white px-6"
+        onClick={() => {
+          // Xử lý logic xuất hóa đơn ở đây
+          if (!currentMonthBill) {
+            snackbar.openSnackbar({
+              text: "Chưa có hóa đơn cho tháng này!",
+              type: "warning",
+            });
+            return;
+          }
+          setShowExportBillModal(true);
+          snackbar.openSnackbar({
+            text: "Đang chuẩn bị xuất hóa đơn...",
+            type: "success",
+          });
+          // Chuyển đến trang xuất hóa đơn hoặc mở modal xuất hóa đơn
+        }}
+        disabled={!currentMonthBill}
+      >
+        {currentMonthBill ? "Xuất hóa đơn tháng này" : "Chưa có hóa đơn để xuất"}
+      </Button>
+    </Box>
+          </>
         )}
       </div>
 
@@ -904,6 +1122,131 @@ const ElectricityCalculator = () => {
           })()}
         </Box>
       </Modal>
+
+      {/* Export Bill Modal */}
+<Modal
+  visible={showExportBillModal}
+  onClose={() => setShowExportBillModal(false)}
+  actions={[
+    {
+      text: "Đóng",
+      onClick: () => setShowExportBillModal(false),
+    },
+    {
+      text: "Tải (PNG)",
+      onClick: () => downloadBillAsImage(),
+      primary: "true",
+    },
+  ]}
+>
+  <Box className="p-4" id="bill-export" style={{ maxWidth: "600px", margin: "0 auto" }}>
+    {/* Header */}
+    <Box className="text-center mb-4 pb-3 border-b">
+      <Text.Title size="normal">HÓA ĐƠN TIỀN ĐIỆN</Text.Title>
+      <Text className="mt-1 font-medium">Tháng {currentMonth}</Text>
+      {currentMonthBill && currentMonthBill.isMultiMonth && (
+        <Text size="small" className="text-blue-600 mt-1">
+          (Hóa đơn gộp: {[...currentMonthBill.includedMonths, currentMonth].join(", ")})
+        </Text>
+      )}
+    </Box>
+
+    {/* Bill info */}
+    <Box className="mb-4 p-3 bg-blue-50 rounded-md">
+      <Box flex justifyContent="space-between" className="mb-2">
+        <Text>Tổng tiêu thụ:</Text>
+        <Text bold>{currentMonthBill?.totalKwh} kWh</Text>
+      </Box>
+      <Box flex justifyContent="space-between" className="mb-2">
+        <Text>Đơn giá điện:</Text>
+        <Text bold>
+          {new Intl.NumberFormat("vi-VN").format(currentMonthBill?.pricePerUnit)} đ/kWh
+        </Text>
+      </Box>
+      <Box flex justifyContent="space-between" className="mb-2">
+        <Text>Tiền điện:</Text>
+        <Text bold>
+          {new Intl.NumberFormat("vi-VN").format(
+            currentMonthBill?.totalAmount - currentMonthBill?.totalExtraCost
+          )} đ
+        </Text>
+      </Box>
+      <Box flex justifyContent="space-between" className="mb-2">
+        <Text>Chi phí bổ sung:</Text>
+        <Text bold>
+          {new Intl.NumberFormat("vi-VN").format(currentMonthBill?.totalExtraCost)} đ
+        </Text>
+      </Box>
+      <Box flex justifyContent="space-between" className="pt-2 border-t">
+        <Text bold>Tổng cộng:</Text>
+        <Text bold className="text-red-600 text-lg">
+          {new Intl.NumberFormat("vi-VN").format(currentMonthBill?.totalAmount)} đ
+        </Text>
+      </Box>
+    </Box>
+
+    {/* People details */}
+    <Text bold className="mb-2">Chi tiết theo người dùng:</Text>
+    <Box className="space-y-3">
+      {people.map((person) => {
+        const reading = readings.find(
+          (r) => r.personId === person.id && r.month === currentMonth
+        );
+        if (!reading) return null;
+        
+        const usage = reading.newReading - reading.oldReading;
+        const electricityCost = currentMonthBill ? calculateCost(reading, currentMonthBill) : 0;
+        const totalCost = electricityCost + (reading.extraCost || 0);
+        
+        return (
+          <Box key={person.id} className="p-3 border rounded-md">
+            <Text bold>{person.name}</Text>
+            <Box className="mt-2 space-y-1">
+              <Box flex justifyContent="space-between">
+                <Text size="small">Chỉ số:</Text>
+                <Text size="small">
+                  {reading.oldReading} → {reading.newReading} ({usage} kWh)
+                </Text>
+              </Box>
+              <Box flex justifyContent="space-between">
+                <Text size="small">Tiền điện:</Text>
+                <Text size="small">
+                  {new Intl.NumberFormat("vi-VN").format(electricityCost)} đ
+                </Text>
+              </Box>
+              {reading.extraCost > 0 && (
+                <Box flex justifyContent="space-between">
+                  <Text size="small">Chi phí bổ sung:</Text>
+                  <Text size="small">
+                    {new Intl.NumberFormat("vi-VN").format(reading.extraCost)} đ
+                  </Text>
+                </Box>
+              )}
+              <Box flex justifyContent="space-between" className="pt-1 border-t">
+                <Text size="small" bold>Tổng cộng:</Text>
+                <Text size="small" bold>
+                  {new Intl.NumberFormat("vi-VN").format(totalCost)} đ
+                </Text>
+              </Box>
+              {reading.note && (
+                <Text size="xSmall" className="mt-1 text-blue-500 italic">
+                  {reading.note}
+                </Text>
+              )}
+            </Box>
+          </Box>
+        );
+      })}
+    </Box>
+
+    {/* Footer */}
+    <Box className="text-center mt-4 pt-4 border-t">
+      <Text size="small" className="italic">
+        Ngày xuất hóa đơn: {new Date().toLocaleDateString("vi-VN")}
+      </Text>
+    </Box>
+  </Box>
+</Modal>
     </Page>
   );
 };
