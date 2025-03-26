@@ -4,7 +4,7 @@
  */
 export function getCurrentMonth() {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 0).padStart(2, "0")}`;
 }
 
 /**
@@ -12,14 +12,11 @@ export function getCurrentMonth() {
  * @param {number} count Số tháng cần lấy
  * @returns {Array<string>} Mảng các tháng theo định dạng YYYY-MM
  */
-export function getRecentMonths(count = 3) {
+export function getRecentMonths(count = 7) {
   const months = [];
   
-  // Tháng hiện tại
-  months.push(getCurrentMonth());
-  
   // Các tháng trước đó
-  for (let i = 1; i <= count; i++) {
+  for (let i = 2; i <= count; i++) {
     const month = new Date();
     month.setMonth(month.getMonth() - i);
     const monthValue = `${month.getFullYear()}-${String(
@@ -61,4 +58,31 @@ export function getPreviousMonth(monthStr) {
   }
 
   return `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
+}
+
+/**
+ * Lấy các tháng chưa có hóa đơn trước tháng hiện tại
+ * @param {string} currentMonth Tháng hiện tại (định dạng YYYY-MM)
+ * @param {Array} bills Mảng các hóa đơn
+ * @returns {Array} Mảng các tháng chưa có hóa đơn
+ */
+export function getPreviousUnbilledMonths(currentMonth, bills) {
+  const result = [];
+  const currentMonthDate = new Date(currentMonth.split('-')[0], parseInt(currentMonth.split('-')[1]) - 1);
+  
+  // Lấy tối đa 6 tháng trước
+  for (let i = 1; i <= 6; i++) {
+    const prevDate = new Date(currentMonthDate);
+    prevDate.setMonth(prevDate.getMonth() - i);
+    
+    const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+    
+    // Kiểm tra nếu tháng này chưa có hóa đơn
+    if (!bills.some(bill => bill.month === prevMonth || 
+        (bill.includedMonths && bill.includedMonths.includes(prevMonth)))) {
+      result.push(prevMonth);
+    }
+  }
+  
+  return result;
 }

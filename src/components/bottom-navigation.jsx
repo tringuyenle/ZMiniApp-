@@ -24,12 +24,12 @@ const AppBottomNavigation = () => {
       <BottomNavigation.Item
         key="electricity-calculator"
         label="Tính tiền"
-        icon={<Icon icon="zi-lightbulb" />}
+        icon={<Icon icon="zi-group" />}
       />
       <BottomNavigation.Item
         key="history"
         label="Lịch sử"
-        icon={<Icon icon="zi-clock" />}
+        icon={<Icon icon="zi-memory" />}
       />
     </BottomNavigation>
   );

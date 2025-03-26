@@ -11,5 +11,8 @@ export default () => {
     server: {
       port: 4000,
     },
+    css: {
+      postcss: './postcss.config.js',
+    },
   });
 };

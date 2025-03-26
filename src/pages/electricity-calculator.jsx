@@ -8,36 +8,43 @@ import {
   Select,
   Modal,
   useSnackbar,
-  useNavigate,
+  Spinner,
+  Checkbox,
 } from "zmp-ui";
-import { useAtom } from "jotai";
-import {
-  peopleState,
-  electricityReadingsState,
-  monthlyBillState,
-} from "../state";
+import { useFirebasePeople } from "../hooks/useFirebasePeople";
+import { useFirebaseReadings } from "../hooks/useFirebaseReadings";
+import { useFirebaseBills } from "../hooks/useFirebaseBills";
 
 // Import các hàm từ services
-import { getCurrentMonth, getPreviousMonth } from "../services/date.service";
-import { 
-  getLatestReading, 
-  hasReadingForMonth, 
-  getMonthsWithReadings, 
-  getMonthReadings,
-  calculateMonthUsage
-} from "../services/reading.service";
 import {
-  calculateCost,
-  getMonthBill,
-  allPeopleHaveReadings,
-  updateMonthBill
-} from "../services/bill.service";
+  getCurrentMonth,
+  getRecentMonths,
+  getPreviousUnbilledMonths,
+} from "../services/date.service";
+import {
+  getLatestReading,
+  hasReadingForMonth,
+  getMonthsWithReadings,
+  calculateMonthUsage,
+  calculateTotalUsageForMonths,
+} from "../services/reading.service";
+import { calculateCost, allPeopleHaveReadings } from "../services/bill.service";
 
 const ElectricityCalculator = () => {
-  const navigate = useNavigate();
-  const [people, setPeople] = useAtom(peopleState);
-  const [readings, setReadings] = useAtom(electricityReadingsState);
-  const [monthlyBills, setMonthlyBills] = useAtom(monthlyBillState);
+  // Sử dụng hooks Firebase
+  const { people, loading: peopleLoading, addNewPerson } = useFirebasePeople();
+  const {
+    readings,
+    loading: readingsLoading,
+    addNewReading,
+    updateExistingReading,
+  } = useFirebaseReadings();
+  const {
+    bills,
+    loading: billsLoading,
+    saveMonthBill,
+    getMonthBill,
+  } = useFirebaseBills();
 
   const [showAddPersonModal, setShowAddPersonModal] = useState(false);
   const [showAddReadingModal, setShowAddReadingModal] = useState(false);
@@ -47,7 +54,11 @@ const ElectricityCalculator = () => {
   const [totalBillAmount, setTotalBillAmount] = useState(0);
   const [pricePerUnit, setPricePerUnit] = useState(0);
   const [pricePerUnitEdited, setPricePerUnitEdited] = useState(false);
+  const [isMultiMonthBill, setIsMultiMonthBill] = useState(false);
+  const [includedMonths, setIncludedMonths] = useState([]);
+
   const snackbar = useSnackbar();
+  const isLoading = peopleLoading || readingsLoading || billsLoading;
 
   // Form state
   const [newPerson, setNewPerson] = useState({ name: "" });
@@ -61,7 +72,7 @@ const ElectricityCalculator = () => {
   });
 
   // Add new person
-  const handleAddPerson = () => {
+  const handleAddPerson = async () => {
     if (!newPerson.name.trim()) {
       snackbar.openSnackbar({
         text: "Vui lòng nhập tên người dùng!",
@@ -70,11 +81,37 @@ const ElectricityCalculator = () => {
       return;
     }
 
-    const id = Date.now().toString();
-    setPeople([...people, { id, ...newPerson }]);
-    setNewPerson({ name: "" });
-    setShowAddPersonModal(false);
-    snackbar.openSnackbar({ text: "Đã thêm người dùng mới!", type: "success" });
+    const result = await addNewPerson(newPerson);
+
+    if (result) {
+      setNewPerson({ name: "" });
+      setShowAddPersonModal(false);
+      snackbar.openSnackbar({
+        text: "Đã thêm người dùng mới!",
+        type: "success",
+      });
+    } else {
+      snackbar.openSnackbar({
+        text: "Có lỗi khi thêm người dùng!",
+        type: "error",
+      });
+    }
+  };
+
+  const isMonthLocked = (month) => {
+    // Phân tích tháng thành năm và số tháng
+    const [targetYear, targetMonth] = month.split("-").map(Number);
+
+    // Kiểm tra tất cả các hóa đơn để xem có tháng nào lớn hơn không
+    return bills.some((bill) => {
+      const [billYear, billMonth] = bill.month.split("-").map(Number);
+
+      // So sánh: billYear > targetYear hoặc (billYear === targetYear và billMonth > targetMonth)
+      return (
+        billYear > targetYear ||
+        (billYear === targetYear && billMonth > targetMonth)
+      );
+    });
   };
 
   // Set up the reading form when a person is selected
@@ -86,11 +123,11 @@ const ElectricityCalculator = () => {
         // If previous reading exists, use its new reading as the old reading
         setNewReading({
           personId: selectedPerson.id,
-          month: currentMonth, // Use current month for now
-          oldReading: latestReading.newReading, // Use previous new reading as old reading
-          newReading: latestReading.newReading, // Initialize with same value
-          extraCost: 0,
-          note: "",
+          month: currentMonth,
+          oldReading: latestReading.newReading,
+          newReading: latestReading.newReading,
+          extraCost: latestReading.extraCost,
+          note: latestReading.note,
         });
       } else {
         // First time reading for this person
@@ -99,15 +136,15 @@ const ElectricityCalculator = () => {
           month: currentMonth,
           oldReading: 0,
           newReading: 0,
-          extraCost: 0,
-          note: "",
+          extraCost: 10000,
+          note: "phí đồng hồ hằng tháng",
         });
       }
     }
-  }, [selectedPerson, currentMonth]);
+  }, [selectedPerson, currentMonth, readings]);
 
-  // Add new reading
-  const handleAddReading = () => {
+  // Add/Update reading
+  const handleAddReading = async () => {
     if (!newReading.personId) {
       snackbar.openSnackbar({
         text: "Vui lòng chọn người dùng!",
@@ -125,49 +162,50 @@ const ElectricityCalculator = () => {
     }
 
     // Check if reading for this person and month already exists
-    const existingReadingIndex = readings.findIndex(
+    const existingReading = readings.find(
       (r) => r.personId === newReading.personId && r.month === newReading.month
     );
 
-    const id = Date.now().toString();
+    let result;
 
-    if (existingReadingIndex >= 0) {
+    if (existingReading) {
       // Update existing reading
-      const updatedReadings = [...readings];
-      updatedReadings[existingReadingIndex] = {
-        ...updatedReadings[existingReadingIndex],
+      result = await updateExistingReading(existingReading.id, {
         newReading: newReading.newReading,
         extraCost: newReading.extraCost,
         note: newReading.note,
-      };
-      setReadings(updatedReadings);
+      });
     } else {
       // Add new reading
-      setReadings([...readings, { id, ...newReading }]);
+      result = await addNewReading(newReading);
     }
 
-    setShowAddReadingModal(false);
-    snackbar.openSnackbar({
-      text: "Đã cập nhật chỉ số điện!",
-      type: "success",
-    });
+    if (result) {
+      setShowAddReadingModal(false);
+      snackbar.openSnackbar({
+        text: "Đã cập nhật chỉ số điện!",
+        type: "success",
+      });
 
-    // Check if all people have readings for this month
-    checkAllReadingsComplete(newReading.month);
+      // Check if all people have readings for this month
+      checkAllReadingsComplete(newReading.month);
+    } else {
+      snackbar.openSnackbar({
+        text: "Có lỗi khi lưu chỉ số điện!",
+        type: "error",
+      });
+    }
   };
 
   // Check if all people have readings for a specific month
   const checkAllReadingsComplete = (month) => {
-    // Sử dụng hàm từ bill.service
     if (allPeopleHaveReadings(month, people, readings)) {
-      // All people have readings for this month
       snackbar.openSnackbar({
         text: "Đã nhập chỉ số cho tất cả mọi người! Bạn có thể nhập tổng tiền điện.",
         type: "success",
         duration: 5000,
       });
 
-      // Open bill entry modal after a short delay
       setTimeout(() => {
         setShowBillModal(true);
       }, 1000);
@@ -175,7 +213,8 @@ const ElectricityCalculator = () => {
   };
 
   // Handle bill entry
-  const handleBillSubmit = () => {
+  const handleBillSubmit = async () => {
+    // Kiểm tra valid
     if (totalBillAmount <= 0 && pricePerUnit <= 0) {
       snackbar.openSnackbar({
         text: "Vui lòng nhập tổng tiền điện hoặc đơn giá hợp lệ!",
@@ -184,9 +223,11 @@ const ElectricityCalculator = () => {
       return;
     }
 
-    // Calculate total kWh used this month
-    // Sử dụng hàm từ reading.service
-    const totalKwh = calculateMonthUsage(currentMonth, readings);
+    // Tính tổng kWh - nếu là hóa đơn gộp, tính cho tất cả các tháng
+    const months = isMultiMonthBill
+      ? [...includedMonths, currentMonth]
+      : [currentMonth];
+    const totalKwh = calculateTotalUsageForMonths(months, readings);
 
     if (totalKwh === 0) {
       snackbar.openSnackbar({
@@ -196,53 +237,76 @@ const ElectricityCalculator = () => {
       return;
     }
 
-    // Determine which value to use - if pricePerUnit was manually changed, use it
-    // Otherwise calculate from totalBillAmount
+    // Tính giá trị cuối cùng
     let finalPricePerUnit = pricePerUnit;
     let finalTotalAmount = totalBillAmount;
 
     if (pricePerUnitEdited) {
-      // If price was manually edited, recalculate total amount
       finalPricePerUnit = pricePerUnit;
       finalTotalAmount = Math.round(totalKwh * pricePerUnit);
     } else {
-      // Otherwise calculate price from total amount
       finalPricePerUnit = totalBillAmount / totalKwh;
       finalTotalAmount = totalBillAmount;
     }
 
-    // Sử dụng hàm từ bill.service để cập nhật hóa đơn
-    const updatedBills = updateMonthBill(
-      currentMonth,
-      finalTotalAmount,
-      totalKwh,
-      finalPricePerUnit,
-      monthlyBills
-    );
-    
-    setMonthlyBills(updatedBills);
+// Tính toán tổng chi phí phụ từ tất cả các tháng liên quan
+const calculateTotalExtraCost = (months, readings) => {
+  return readings
+    .filter(reading => months.includes(reading.month))
+    .reduce((sum, reading) => sum + (reading.extraCost || 0), 0);
+};
 
-    setShowBillModal(false);
-    snackbar.openSnackbar({
-      text: `Đã cập nhật giá điện: ${new Intl.NumberFormat("vi-VN").format(
-        finalPricePerUnit
-      )} đ/kWh`,
-      type: "success",
-    });
+// Lấy tổng chi phí phụ
+const totalExtraCost = calculateTotalExtraCost(months, readings);
 
-    // Reset edited state
-    setPricePerUnitEdited(false);
+// Lưu dữ liệu vào Firebase với thông tin tháng gộp và chi phí phụ
+const billData = {
+  totalAmount: finalTotalAmount,
+  totalKwh: totalKwh,
+  pricePerUnit: finalPricePerUnit,
+  includedMonths: isMultiMonthBill ? includedMonths : [],
+  isMultiMonth: isMultiMonthBill,
+  totalExtraCost: totalExtraCost, // Thêm thông tin về tổng chi phí phụ
+};
+
+    const result = await saveMonthBill(currentMonth, billData);
+
+    if (result) {
+      setShowBillModal(false);
+      snackbar.openSnackbar({
+        text: `Đã cập nhật giá điện: ${new Intl.NumberFormat("vi-VN").format(
+          finalPricePerUnit
+        )} đ/kWh${isMultiMonthBill ? " (hóa đơn gộp)" : ""}`,
+        type: "success",
+      });
+      setPricePerUnitEdited(false);
+      setIsMultiMonthBill(false);
+      setIncludedMonths([]);
+    } else {
+      // Xử lý lỗi
+    }
   };
 
   // Check if a person has a reading for the current month
   const hasCurrentMonthReading = (personId) => {
-    // Sử dụng hàm từ reading.service
     return hasReadingForMonth(personId, currentMonth, readings);
   };
 
   // Get current month bill info
-  const currentMonthBill = getMonthBill(currentMonth, monthlyBills);
+  const currentMonthBill = getMonthBill(currentMonth);
   const monthsWithReadings = getMonthsWithReadings(readings);
+
+  // Hiển thị loading nếu đang tải dữ liệu
+  if (isLoading) {
+    return (
+      <Page className="page">
+        <Box className="h-64 flex items-center justify-center">
+          <Spinner />
+          <Text className="ml-2">Đang tải dữ liệu...</Text>
+        </Box>
+      </Page>
+    );
+  }
 
   return (
     <Page className="page">
@@ -260,27 +324,31 @@ const ElectricityCalculator = () => {
             {/* Current month option */}
             <option value={getCurrentMonth()}>
               {getCurrentMonth()} (Hiện tại)
+              {isMonthLocked(getCurrentMonth()) ? " 🔒" : ""}
             </option>
 
             {/* Previous months options */}
-            {[1, 2, 3].map((i) => {
-              const month = new Date();
-              month.setMonth(month.getMonth() - i);
-              const monthValue = `${month.getFullYear()}-${String(
-                month.getMonth() + 1
-              ).padStart(2, "0")}`;
+            {getRecentMonths().map((monthValue) => {
+              const locked = isMonthLocked(monthValue);
               return (
                 <option key={monthValue} value={monthValue}>
                   {monthValue}
+                  {locked ? " 🔒" : ""}
                 </option>
               );
             })}
           </Select>
         </Box>
 
-        <Box flex justifyContent="space-between" alignItems="center" mb={4}>
+        <Box
+          flex
+          flexDirection="column"
+          justifyContent="space-between"
+          alignItems="center"
+          mb={4}
+        >
           <Text.Title size="normal">Quản lý người dùng</Text.Title>
-          <Box flex>
+          <Box flex mt={2}>
             <Button
               size="small"
               onClick={() => setShowAddPersonModal(true)}
@@ -292,19 +360,43 @@ const ElectricityCalculator = () => {
               <Button
                 size="small"
                 variant="secondary"
-                onClick={() => setShowBillModal(true)}
+                onClick={() => {
+                  if (isMonthLocked(currentMonth)) {
+                    snackbar.openSnackbar({
+                      text: "Không thể điều chỉnh tiền điện. Tháng này đã bị khóa.",
+                      type: "warning",
+                    });
+                    return;
+                  }
+                  setShowBillModal(true);
+                }}
+                disabled={isMonthLocked(currentMonth)}
               >
-                Điều chỉnh tiền
+                {isMonthLocked(currentMonth) ? "Đã khóa" : "Điều chỉnh tiền"}
               </Button>
             ) : (
               people.length > 0 && (
                 <Button
                   size="small"
                   variant="secondary"
-                  onClick={() => setShowBillModal(true)}
-                  disabled={!people.every((p) => hasCurrentMonthReading(p.id))}
+                  onClick={() => {
+                    if (isMonthLocked(currentMonth)) {
+                      snackbar.openSnackbar({
+                        text: "Không thể nhập tiền điện. Tháng này đã bị khóa.",
+                        type: "warning",
+                      });
+                      return;
+                    }
+                    setShowBillModal(true);
+                  }}
+                  disabled={
+                    !people.every((p) => hasCurrentMonthReading(p.id)) ||
+                    isMonthLocked(currentMonth)
+                  }
                 >
-                  Nhập tổng tiền điện
+                  {isMonthLocked(currentMonth)
+                    ? "Đã khóa"
+                    : "Nhập tổng tiền điện"}
                 </Button>
               )
             )}
@@ -313,7 +405,7 @@ const ElectricityCalculator = () => {
 
         {/* Current month bill info */}
         {currentMonthBill && (
-          <Box className="p-3 bg-blue-50 rounded-md mb{4}">
+          <Box className="p-4 bg-blue-50 rounded-md mb-4">
             <Box flex justifyContent="space-between" mb={1}>
               <Text size="small">Tổng tiền điện:</Text>
               <Text bold>
@@ -323,11 +415,17 @@ const ElectricityCalculator = () => {
                 đ
               </Text>
             </Box>
+
             <Box flex justifyContent="space-between" mb={1}>
               <Text size="small">Tổng tiêu thụ:</Text>
               <Text bold>{currentMonthBill.totalKwh} kWh</Text>
             </Box>
-            <Box flex justifyContent="space-between">
+
+            <Box
+              flex
+              justifyContent="space-between"
+              mb={currentMonthBill.isMultiMonth ? 1 : 0}
+            >
               <Text size="small">Đơn giá:</Text>
               <Text bold>
                 {new Intl.NumberFormat("vi-VN").format(
@@ -336,6 +434,18 @@ const ElectricityCalculator = () => {
                 đ/kWh
               </Text>
             </Box>
+
+            {currentMonthBill.isMultiMonth && (
+              <Box className="mt-2 pt-2 border-t border-blue-200">
+                <Text size="small" italic className="text-blue-600">
+                  Hóa đơn này bao gồm{" "}
+                  {currentMonthBill.includedMonths.length + 1} tháng:{" "}
+                  {[...currentMonthBill.includedMonths, currentMonth].join(
+                    ", "
+                  )}
+                </Text>
+              </Box>
+            )}
           </Box>
         )}
 
@@ -350,23 +460,34 @@ const ElectricityCalculator = () => {
               const reading = readings.find(
                 (r) => r.personId === person.id && r.month === currentMonth
               );
+              const monthLocked = isMonthLocked(currentMonth);
 
               return (
                 <Box
                   key={person.id}
                   className={`p-3 border rounded-md ${
                     hasReading ? "border-green-500" : ""
-                  }`}
+                  } ${monthLocked ? "opacity-75" : ""}`}
                   flex
                   justifyContent="space-between"
                   alignItems="center"
                   onClick={() => {
+                    if (monthLocked) {
+                      snackbar.openSnackbar({
+                        text: "Không thể thay đổi chỉ số. Tháng này đã bị khóa.",
+                        type: "warning",
+                      });
+                      return;
+                    }
                     setSelectedPerson(person);
                     setShowAddReadingModal(true);
                   }}
                 >
                   <Box>
-                    <Text bold>{person.name}</Text>
+                    <Text bold>
+                      {person.name}
+                      {monthLocked && <span className="ml-1">🔒</span>}
+                    </Text>
                     {hasReading && (
                       <Box className="mt-1">
                         <Text size="xSmall">
@@ -388,6 +509,7 @@ const ElectricityCalculator = () => {
                   <Button
                     size="small"
                     variant={hasReading ? "secondary" : "primary"}
+                    disabled={monthLocked}
                   >
                     {hasReading ? "Sửa" : "Thêm"}
                   </Button>
@@ -397,53 +519,6 @@ const ElectricityCalculator = () => {
           </Box>
         )}
       </div>
-
-      {/* Monthly summary */}
-      {monthsWithReadings.length > 0 && (
-        <div className="section-container">
-          <Text.Title size="normal" className="mb-4">
-            Tổng kết theo tháng
-          </Text.Title>
-          <Box className="space-y-3">
-            {monthsWithReadings.map((month) => {
-              const monthBill = getMonthBill(month, monthlyBills);
-              const monthReadings = getMonthReadings(month, readings);
-              const totalUsage = calculateMonthUsage(month, readings);
-              let totalCost = 0;
-
-              monthReadings.forEach((reading) => {
-                if (monthBill) {
-                  totalCost += calculateCost(reading, monthBill);
-                }
-              });
-
-              return (
-                <Box key={month} className="p-3 border rounded-md">
-                  <Box flex justifyContent="space-between">
-                    <Text bold>Tháng {month}</Text>
-                    {monthBill && (
-                      <Text size="small">
-                        {new Intl.NumberFormat("vi-VN").format(
-                          monthBill.pricePerUnit
-                        )}{" "}
-                        đ/kWh
-                      </Text>
-                    )}
-                  </Box>
-                  <Box flex justifyContent="space-between" className="mt-1">
-                    <Text size="small">Tổng tiêu thụ: {totalUsage} kWh</Text>
-                    {monthBill && (
-                      <Text size="small" bold>
-                        {new Intl.NumberFormat("vi-VN").format(totalCost)} đ
-                      </Text>
-                    )}
-                  </Box>
-                </Box>
-              );
-            })}
-          </Box>
-        </div>
-      )}
 
       {/* Add Person Modal */}
       <Modal
@@ -458,7 +533,7 @@ const ElectricityCalculator = () => {
           {
             text: "Thêm",
             onClick: handleAddPerson,
-            primary: true,
+            primary: "true",
           },
         ]}
       >
@@ -487,7 +562,7 @@ const ElectricityCalculator = () => {
           {
             text: "Lưu",
             onClick: handleAddReading,
-            primary: true,
+            primary: "true",
           },
         ]}
       >
@@ -557,28 +632,89 @@ const ElectricityCalculator = () => {
           {
             text: "Tính toán",
             onClick: handleBillSubmit,
-            primary: true,
+            primary: "true",
           },
         ]}
       >
         <Box className="p-4 space-y-4">
+          {/* Thêm UI để chỉ định nếu hóa đơn này bao gồm nhiều tháng */}
+          <Box className="mb-2">
+            <Checkbox
+              label="Đây là hóa đơn gộp nhiều tháng"
+              checked={isMultiMonthBill}
+              onChange={(e) => setIsMultiMonthBill(e.target.checked)}
+            />
+            {isMultiMonthBill && (
+              <Box className="mt-2 p-2 bg-yellow-50 rounded-md">
+                <Text size="small">Hóa đơn này bao gồm:</Text>
+                <Box className="mt-1">
+                  {getPreviousUnbilledMonths(currentMonth, bills).map(
+                    (month) => (
+                      <Checkbox
+                        key={month}
+                        label={month}
+                        checked={includedMonths.includes(month)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setIncludedMonths([...includedMonths, month]);
+                          } else {
+                            setIncludedMonths(
+                              includedMonths.filter((m) => m !== month)
+                            );
+                          }
+                        }}
+                      />
+                    )
+                  )}
+                </Box>
+              </Box>
+            )}{" "}
+          </Box>
+
+          {/* Các input khác giữ nguyên */}
           <Input
             type="number"
             label="Tổng tiền điện (đ)"
             placeholder="Nhập tổng số tiền trên hóa đơn"
-            value={pricePerUnitEdited ? (() => {
-              // Tính lại tổng tiền dựa trên đơn giá đã điều chỉnh
-              const totalKwh = calculateMonthUsage(currentMonth, readings);
-              return Math.round(pricePerUnit * totalKwh);
-            })() : totalBillAmount}
+            value={
+              pricePerUnitEdited
+                ? (() => {
+                    const totalKwh = calculateMonthUsage(
+                      currentMonth,
+                      readings
+                    );
+                    return Math.round(pricePerUnit * totalKwh);
+                  })()
+                : totalBillAmount
+            }
             onChange={(e) => {
               setTotalBillAmount(Number(e.target.value));
-              // Nếu thay đổi tổng tiền, reset trạng thái chỉnh sửa đơn giá
               setPricePerUnitEdited(false);
             }}
           />
 
-          {/* Summary of readings */}
+          {/* Hiển thị thêm thông tin khi là hóa đơn gộp */}
+          {isMultiMonthBill && includedMonths.length > 0 && (
+            <Box className="p-2 bg-blue-50 rounded-md">
+              <Text bold>Thông tin hóa đơn gộp:</Text>
+              <Box className="mt-1">
+                <Text size="small">
+                  Các tháng được gộp: {includedMonths.join(", ")} và{" "}
+                  {currentMonth}
+                </Text>
+                <Text size="small" className="mt-1">
+                  Tổng kWh sử dụng cho {includedMonths.length + 1} tháng:{" "}
+                  {calculateTotalUsageForMonths(
+                    [...includedMonths, currentMonth],
+                    readings
+                  )}{" "}
+                  kWh
+                </Text>
+              </Box>
+            </Box>
+          )}
+
+          {/* Phần tổng kết giữ nguyên */}
           <Box className="py-2">
             <Text bold>Tổng kết chỉ số:</Text>
             <Box className="space-y-2 mt-2">

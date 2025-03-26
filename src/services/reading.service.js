@@ -72,3 +72,18 @@ export function calculateMonthUsage(month, readings) {
   
   return totalUsage;
 }
+
+/**
+ * Tính tổng lượng điện sử dụng cho nhiều tháng
+ * @param {Array} months Mảng các tháng cần tính (định dạng YYYY-MM)
+ * @param {Array} readings Mảng các chỉ số điện
+ * @returns {number} Tổng lượng điện sử dụng (kWh)
+ */
+export function calculateTotalUsageForMonths(months, readings) {
+  return readings
+    .filter(reading => months.includes(reading.month))
+    .reduce((total, reading) => {
+      const usage = Math.max(0, reading.newReading - reading.oldReading);
+      return total + usage;
+    }, 0);
+}

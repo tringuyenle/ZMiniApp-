@@ -1,6 +1,5 @@
-import React, { Suspense } from "react";
+import React from "react";
 import { Box, Page, Text, Button, useNavigate } from "zmp-ui";
-import UserCard from "../components/user-card";
 
 const HomePage = () => {
   const navigate = useNavigate();
