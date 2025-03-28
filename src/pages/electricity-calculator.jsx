@@ -1158,26 +1158,12 @@ const ElectricityCalculator = () => {
           {/* Bill info */}
           <Box className="mb-4 p-3 bg-blue-50 rounded-md">
             <Box flex justifyContent="space-between" className="mb-2">
-              <Text>Tổng tiêu thụ:</Text>
-              <Text bold>{currentMonthBill?.totalKwh} kWh</Text>
-            </Box>
-            <Box flex justifyContent="space-between" className="mb-2">
               <Text>Đơn giá điện:</Text>
               <Text bold>
                 {new Intl.NumberFormat("vi-VN").format(
                   currentMonthBill?.pricePerUnit
                 )}{" "}
                 đ/kWh
-              </Text>
-            </Box>
-            <Box flex justifyContent="space-between" className="mb-2">
-              <Text>Tiền điện:</Text>
-              <Text bold>
-                {new Intl.NumberFormat("vi-VN").format(
-                  currentMonthBill?.totalAmount -
-                    currentMonthBill?.totalExtraCost
-                )}{" "}
-                đ
               </Text>
             </Box>
           </Box>
@@ -1187,7 +1173,7 @@ const ElectricityCalculator = () => {
             Chi tiết theo người dùng:
           </Text>
           <Box className="space-y-3">
-            {people.map((person) => {
+            {people.filter(person => person.name.toLowerCase() !== "cần").map((person) => {
               const reading = readings.find(
                 (r) => r.personId === person.id && r.month === currentMonth
               );
