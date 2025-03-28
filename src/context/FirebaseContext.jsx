@@ -1,7 +1,14 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { signInAnonymous, getCurrentUserId, getPeople, getReadings, getBills } from '../services/firebase.service';
 
-const FirebaseContext = createContext(null);
+export const FirebaseContext = createContext({
+  people: [],
+  readings: [],
+  bills: [],
+  loading: true,
+  userId: null,
+  setUserId: () => {},
+});
 
 export const FirebaseProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
@@ -11,56 +18,53 @@ export const FirebaseProvider = ({ children }) => {
   const [readings, setReadings] = useState([]);
   const [bills, setBills] = useState([]);
   
-  // Đăng nhập và khởi tạo dữ liệu
+  // Khởi tạo với ID mặc định khi component mount
   useEffect(() => {
-    const initializeApp = async () => {
-      setLoading(true);
-      
+    const initializeDefaultUserId = async () => {
       try {
-        // Ưu tiên lấy userId từ Zalo trước
         const currentUserId = await getCurrentUserId();
-        setUserId(currentUserId);
-        
-        // Nếu không có userId từ Zalo, thử đăng nhập ẩn danh
-        if (!currentUserId) {
-          const firebaseUser = await signInAnonymous();
-          setUser(firebaseUser);
-          if (firebaseUser) {
-            setUserId(`firebase_${firebaseUser.uid}`);
-          }
-        }
-        
-        // Nếu có userId (từ bất kỳ nguồn nào), tải dữ liệu
-        if (currentUserId || userId) {
-          const idToUse = currentUserId || userId;
-          console.log("Loading data for userId:", idToUse);
-          
-          const [peopleData, readingsData, billsData] = await Promise.all([
-            getPeople(idToUse),
-            getReadings(idToUse),
-            getBills(idToUse)
-          ]);
-          
-          setPeople(peopleData);
-          setReadings(readingsData);
-          setBills(billsData);
-        } else {
-          console.error("Không thể xác định userId");
+        if (currentUserId) {
+          setUserId(currentUserId);
         }
       } catch (error) {
-        console.error("Lỗi khởi tạo Firebase:", error);
+        console.error("Không thể lấy userId mặc định:", error);
+      }
+    };
+    
+    initializeDefaultUserId();
+  }, []);
+  
+  // Tải dữ liệu mỗi khi userId thay đổi
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (!userId) return;
+      
+      setLoading(true);
+      try {        
+        // Tải dữ liệu mới với userId đã thay đổi
+        const [peopleData, readingsData, billsData] = await Promise.all([
+          getPeople(userId),
+          getReadings(userId),
+          getBills(userId)
+        ]);
+        
+        setPeople(peopleData);
+        setReadings(readingsData);
+        setBills(billsData);
+      } catch (error) {
+        console.error("Lỗi khi tải dữ liệu:", error);
       } finally {
         setLoading(false);
       }
     };
     
-    initializeApp();
-  }, []);
+    loadUserData();
+  }, [userId]);
   
-  // Giá trị context
   const value = {
     user,
     userId,
+    setUserId,
     people,
     setPeople,
     readings,

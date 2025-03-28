@@ -211,7 +211,7 @@ const HistoryPage = () => {
                   flex
                   justifyContent="center"
                 >
-                  <Text size="small" italic className="text-blue-500">
+                  <Text size="small" className="text-blue-500 italic">
                     Hóa đơn này bao gồm {bill.includedMonths.length + 1} tháng:{" "}
                     {[...bill.includedMonths, bill.month].join(", ")}
                   </Text>
@@ -251,8 +251,8 @@ const HistoryPage = () => {
                 )}{" "}
                 đ/kWh
               </Text>
-            ) : (
-              <Text size="small" italic className="text-gray-500">
+            ) : ( 
+              <Text size="small" className="text-gray-500 italic">
                 Chưa có hóa đơn
               </Text>
             )}
@@ -309,7 +309,7 @@ const HistoryPage = () => {
                   flex
                   justifyContent="center"
                 >
-                  <Text size="small" italic className="text-blue-600">
+                  <Text size="small" className="text-blue-600 italic">
                     Hóa đơn này bao gồm{" "}
                     {monthBill.includedMonths.length + 1} tháng:{" "}
                     {[...monthBill.includedMonths, month].join(", ")}
@@ -323,7 +323,7 @@ const HistoryPage = () => {
                   flex
                   justifyContent="center"
                 >
-                  <Text size="small" italic className="text-blue-600">
+                  <Text size="small" className="text-blue-600 italic">
                     Thuộc hóa đơn tháng {monthBill.originalBillMonth}
                   </Text>
                 </Box>

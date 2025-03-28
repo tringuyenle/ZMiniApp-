@@ -81,6 +81,8 @@ export function getPreviousUnbilledMonths(currentMonth, bills) {
     if (!bills.some(bill => bill.month === prevMonth || 
         (bill.includedMonths && bill.includedMonths.includes(prevMonth)))) {
       result.push(prevMonth);
+    } else {
+      break;
     }
   }
   

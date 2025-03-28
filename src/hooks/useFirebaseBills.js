@@ -4,17 +4,19 @@ import { addOrUpdateBill } from '../services/firebase.service';
 import { getMonthBill as getMonthBillService } from "../services/bill.service";
 
 export function useFirebaseBills() {
-  const { bills, setBills } = useFirebase();
+  const { bills, setBills, userId } = useFirebase();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  // Thêm hoặc cập nhật hóa đơn
-  const saveMonthBill = async (month, billData) => {
+  // Thêm hoặc cập nhật hóa đơn - đã thêm tham số customUserId
+  const saveMonthBill = async (month, billData, customUserId = null) => {
     setLoading(true);
     setError(null);
     
     try {
-      const savedBill = await addOrUpdateBill(month, billData);
+      // Sử dụng userId từ context nếu customUserId không được cung cấp
+      const idToUse = customUserId || userId;
+      const savedBill = await addOrUpdateBill(month, billData, idToUse);
       
       if (savedBill) {
         // Kiểm tra xem đã có hóa đơn cho tháng này chưa

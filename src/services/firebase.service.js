@@ -68,9 +68,9 @@ export const getPeople = async (userId) => {
   }
 };
 
-export const addPerson = async (data) => {
+export const addPerson = async (data, customUserId = null) => {
   try {
-    const userId = await getCurrentUserId();
+    const userId = customUserId || await getCurrentUserId();
     if (!userId) throw new Error("Không thể xác định người dùng");
     
     const personData = {
@@ -87,8 +87,9 @@ export const addPerson = async (data) => {
   }
 };
 
-export const updatePerson = async (id, data) => {
+export const updatePerson = async (id, data, customUserId = null) => {
   try {
+    const userId = customUserId || await getCurrentUserId();
     await updateDoc(doc(db, "people", id), {
       ...data,
       updatedAt: new Date().toISOString()
@@ -100,8 +101,9 @@ export const updatePerson = async (id, data) => {
   }
 };
 
-export const deletePerson = async (id) => {
+export const deletePerson = async (id, customUserId = null) => {
   try {
+    const userId = customUserId || await getCurrentUserId();
     await deleteDoc(doc(db, "people", id));
     return true;
   } catch (error) {
@@ -127,9 +129,9 @@ export const getReadings = async (userId) => {
   }
 };
 
-export const addReading = async (data) => {
+export const addReading = async (data, customUserId = null) => {
   try {
-    const userId = await getCurrentUserId();
+    const userId = customUserId || await getCurrentUserId();
     if (!userId) throw new Error("Không thể xác định người dùng");
     
     const readingData = {
@@ -186,9 +188,9 @@ export const getBills = async (userId) => {
   }
 };
 
-export const addOrUpdateBill = async (month, billData) => {
+export const addOrUpdateBill = async (month, billData, customUserId = null) => {
   try {
-    const userId = await getCurrentUserId();
+    const userId = customUserId || await getCurrentUserId();
     if (!userId) throw new Error("Không thể xác định người dùng");
     
     // Check if bill already exists
